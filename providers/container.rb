@@ -15,8 +15,12 @@ def load_current_resource
   @current_resource
 end
 
+def initialize(new_resource, run_context)
+  super
+  @service = service_init if service?
+end
+
 action :commit do
-  @service = service_action(:nothing) if service?
   if exists?
     commit
     new_resource.updated_by_last_action(true)
@@ -24,15 +28,20 @@ action :commit do
 end
 
 action :cp do
-  @service = service_action(:nothing) if service?
   if exists?
     cp
     new_resource.updated_by_last_action(true)
   end
 end
 
+action :create do
+  unless running? || exists?
+    create
+    new_resource.updated_by_last_action(true)
+  end
+end
+
 action :export do
-  @service = service_action(:nothing) if service?
   if exists?
     export
     new_resource.updated_by_last_action(true)
@@ -40,7 +49,6 @@ action :export do
 end
 
 action :kill do
-  @service = service_action(:nothing) if service?
   if running?
     kill
     new_resource.updated_by_last_action(true)
@@ -48,18 +56,21 @@ action :kill do
 end
 
 action :redeploy do
-  @service = service_action(:nothing) if service?
-  stop if running?
+  stop if (previously_running = running?)
   remove_container if exists?
-  run
+  if previously_running
+    run
+  else
+    create
+  end
   new_resource.updated_by_last_action(true)
 end
 
 action :remove do
-  @service = service_action(:nothing) if service?
   if running?
     stop
     new_resource.updated_by_last_action(true)
+    sleep 1
   end
   if exists?
     remove
@@ -68,17 +79,14 @@ action :remove do
 end
 
 action :remove_link do
-  @service = service_action(:nothing) if service?
   new_resource.updated_by_last_action(remove_link)
 end
 
 action :remove_volume do
-  @service = service_action(:nothing) if service?
   new_resource.updated_by_last_action(remove_volume)
 end
 
 action :restart do
-  @service = service_action(:nothing) if service?
   if exists?
     restart
     new_resource.updated_by_last_action(true)
@@ -86,7 +94,6 @@ action :restart do
 end
 
 action :run do
-  @service = service_action(:nothing) if service?
   unless running?
     if exists?
       start
@@ -98,7 +105,6 @@ action :run do
 end
 
 action :start do
-  @service = service_action(:nothing) if service?
   unless running?
     start
     new_resource.updated_by_last_action(true)
@@ -106,7 +112,6 @@ action :start do
 end
 
 action :stop do
-  @service = service_action(:nothing) if service?
   if running?
     stop
     new_resource.updated_by_last_action(true)
@@ -114,7 +119,6 @@ action :stop do
 end
 
 action :wait do
-  @service = service_action(:nothing) if service?
   if running?
     wait
     new_resource.updated_by_last_action(true)
@@ -141,7 +145,7 @@ def container_matches?(ps)
   return false unless container_image_matches?(ps['image'])
   return false unless container_command_matches_if_exists?(ps['command'])
   return false unless container_name_matches_if_exists?(ps['names'])
-  false
+  true
 end
 
 def container_command_matches_if_exists?(command)
@@ -177,7 +181,7 @@ end
 
 def container_name
   if service?
-    new_resource.container_name || new_resource.image.gsub(/^.*\//, '')
+    new_resource.container_name || new_resource.image.gsub(%r{^.*/}, '')
   else
     new_resource.container_name
   end
@@ -185,6 +189,16 @@ end
 
 def cp
   docker_cmd!("cp #{current_resource.id}:#{new_resource.source} #{new_resource.destination}")
+end
+
+def create
+  create_args = cli_args(
+    run_cli_args.reject { |arg, _| arg == 'detach' }
+  )
+  dc = docker_cmd!("create #{create_args} #{new_resource.image} #{new_resource.command}")
+  dc.error!
+  new_resource.id(dc.stdout.chomp)
+  service_create if service?
 end
 
 # Helper method for `docker_containers` that looks at the position of the headers in the output of
@@ -216,7 +230,7 @@ def get_ranges(header)
 end
 
 #
-# Get a list of all docker containers by parsing the output of `docker ps -a -notrunc`.
+# Get a list of all docker containers by parsing the output of `docker ps -a --no-trunc`.
 #
 # Uses `get_ranges` to determine where column data is within each row. Then, for each line after
 # the header, a hash is build up with the values for each of the columns. A special 'line' entry
@@ -244,7 +258,7 @@ def docker_containers
     # Filter out technical names (eg. 'my-app/db'), which appear in ps['names']
     # when a container has at least another container linking to it. If these
     # names are not filtered they will pollute current_resource.container_name.
-    ps['names'] = ps['names'].split(',').grep(/\A[^\/]+\Z/).join(',') # technical names always contain a '/'
+    ps['names'] = ps['names'].split(',').grep(%r{\A[^\/]+\Z}).join(',') # technical names always contain a '/'
     ps
   end
 end
@@ -285,7 +299,7 @@ def port
   elsif new_resource.port && new_resource.port.is_a?(Fixnum)
     ":#{new_resource.port}"
   else
-    new_resource.port
+    new_resource.port || []
   end
 end
 
@@ -336,12 +350,23 @@ def restart
   end
 end
 
-# rubocop:disable MethodLength
 def run
-  run_args = cli_args(
+  run_args = cli_args(run_cli_args)
+  dr = docker_cmd!("run #{run_args} #{new_resource.image} #{new_resource.command}")
+  dr.error!
+  new_resource.id(dr.stdout.chomp)
+  service_run if service?
+end
+
+# rubocop:disable MethodLength
+def run_cli_args
+  {
+    'add-host' => Array(new_resource.additional_host),
+    'cap-add' => Array(new_resource.cap_add),
     'cpu-shares' => new_resource.cpu_shares,
     'cidfile' => new_resource.cidfile,
     'detach' => new_resource.detach,
+    'device' => Array(new_resource.device),
     'dns' => Array(new_resource.dns),
     'dns-search' => Array(new_resource.dns_search),
     'env' => Array(new_resource.env),
@@ -362,16 +387,14 @@ def run
     'publish-all' => new_resource.publish_exposed_ports,
     'privileged' => new_resource.privileged,
     'rm' => new_resource.remove_automatically,
+    'restart' => new_resource.restart,
     'tty' => new_resource.tty,
+    'ulimit' => Array(new_resource.ulimit),
     'user' => new_resource.user,
     'volume' => Array(new_resource.volume),
     'volumes-from' => new_resource.volumes_from,
     'workdir' => new_resource.working_directory
-  )
-  dr = docker_cmd!("run #{run_args} #{new_resource.image} #{new_resource.command}")
-  dr.error!
-  new_resource.id(dr.stdout.chomp)
-  service_create if service?
+  }
 end
 # rubocop:enable MethodLength
 
@@ -383,11 +406,17 @@ def service?
   new_resource.init_type
 end
 
-def service_action(actions)
+def service_init
+  service_create
+
   if new_resource.init_type == 'runit'
     runit_service service_name do
       run_template_name 'docker-container'
-      action actions
+      finish_script_template_name 'docker-container'
+      supports :restart => true, :reload => true, :status => true, :stop => true
+      action :nothing
+      finish true
+      restart_on_update false
     end
   else
     service service_name do
@@ -397,22 +426,29 @@ def service_action(actions)
       when 'upstart'
         provider Chef::Provider::Service::Upstart
       end
-      supports :status => true, :restart => true, :reload => true
-      action actions
+      supports :restart => true, :reload => true, :status => true
+      action :nothing
     end
   end
 end
 
 def service_create
   case new_resource.init_type
-  when 'runit'
-    service_create_runit
   when 'systemd'
     service_create_systemd
   when 'sysv'
     service_create_sysv
   when 'upstart'
     service_create_upstart
+  end
+end
+
+def service_run
+  case new_resource.init_type
+  when 'runit'
+    service_create_runit
+  else
+    service_start_and_enable
   end
 end
 
@@ -424,7 +460,8 @@ def service_create_runit
       'service_name' => service_name
     )
     run_template_name service_template
-  end
+    action :nothing
+  end.run_action(:enable)
 end
 
 def service_create_systemd
@@ -442,8 +479,9 @@ def service_create_systemd
       :service_name => service_name,
       :sockets => sockets
     )
-    not_if port.empty?
-  end
+    not_if { port.empty? }
+    action :nothing
+  end.run_action(:create)
 
   template "/usr/lib/systemd/system/#{service_name}.service" do
     source service_template
@@ -455,9 +493,8 @@ def service_create_systemd
       :cmd_timeout => new_resource.cmd_timeout,
       :service_name => service_name
     )
-  end
-
-  service_start_and_enable
+    action :nothing
+  end.run_action(:create)
 end
 
 def service_create_sysv
@@ -471,14 +508,27 @@ def service_create_sysv
       :cmd_timeout => new_resource.cmd_timeout,
       :service_name => service_name
     )
-  end
+    action :nothing
+  end.run_action(:create)
 
-  service_start_and_enable
+  # link "/etc/rc.d/init.d/#{service_name}" do
+  #   to "/etc/init.d/#{service_name}"
+  #   only_if { platform_family?('rhel') }
+  #   action :nothing
+  # end.run_action(:create)
 end
 
 def service_create_upstart
   # The upstart init script requires inotifywait, which is in inotify-tools
-  package 'inotify-tools'
+  # For clarity, install the package here but do it only once (no CHEF-3694).
+  begin
+    run_context.resource_collection.find(:package => 'inotify-tools')
+    # If we get here then we already installed the resource the first time.
+  rescue Chef::Exceptions::ResourceNotFound
+    package('inotify-tools') do
+      action :nothing
+    end.run_action(:install)
+  end
 
   template "/etc/init/#{service_name}.conf" do
     source service_template
@@ -490,9 +540,8 @@ def service_create_upstart
       :cmd_timeout => new_resource.cmd_timeout,
       :service_name => service_name
     )
-  end
-
-  service_start_and_enable
+    action :nothing
+  end.run_action(:create)
 end
 
 def service_name
@@ -539,7 +588,7 @@ end
 def service_remove_upstart
   service_stop_and_disable
 
-  file "/etc/init/#{service_name}" do
+  file "/etc/init/#{service_name}.conf" do
     action :delete
   end
 end
@@ -557,8 +606,8 @@ def service_stop
 end
 
 def service_start_and_enable
-  @service.run_action(:start)
   @service.run_action(:enable)
+  @service.run_action(:start)
 end
 
 def service_stop_and_disable
@@ -582,7 +631,7 @@ end
 
 def sockets
   return [] if port.empty?
-  [*port].map { |p| p.gsub!(/.*:/, '') }
+  [*port].map { |p| p.gsub(/.*:/, '') }
 end
 
 def start
@@ -592,6 +641,7 @@ def start
   )
   if service?
     service_create
+    service_run
   else
     docker_cmd!("start #{start_args} #{current_resource.id}")
   end
@@ -604,7 +654,7 @@ def stop
   if service?
     service_stop
   else
-    docker_cmd!("stop #{stop_args} #{current_resource.id}", (new_resource.cmd_timeout + 15))
+    docker_cmd!("stop #{stop_args} #{current_resource.id}", (new_resource.cmd_timeout + 30))
   end
 end
 

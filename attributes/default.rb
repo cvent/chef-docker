@@ -11,13 +11,18 @@ default['docker']['arch'] =
   end
 default['docker']['group_members'] = []
 default['docker']['init_type'] = value_for_platform(
-  %w(amazon centos debian oracle redhat) => {
+  %w(amazon debian oracle) => {
     'default' => 'sysv'
+  },
+  %w(redhat centos) => {
+    %w(6.0 6.1 6.2 6.3 6.4 6.5 6.6) => 'sysv',
+    'default' => 'systemd'
   },
   %w(fedora) => {
     'default' => 'systemd'
   },
   %w(ubuntu) => {
+    %w(15.04) => 'systemd',
     'default' => 'upstart'
   },
   'default' => 'upstart'
@@ -46,7 +51,8 @@ default['docker']['alert_on_error_action'] = :fatal
 
 default['docker']['binary']['dependency_packages'] = value_for_platform_family(
   'debian' => %w(procps xz-utils),
-  'rhel' => %w(procps xz)
+  'rhel' => %w(procps xz),
+  'default' => %w()
 )
 default['docker']['binary']['version'] = node['docker']['version'] || 'latest'
 default['docker']['binary']['checksum'] =
@@ -80,7 +86,11 @@ default['docker']['package']['name'] = value_for_platform(
   'amazon' => {
     'default' => 'docker'
   },
-  %w(centos fedora redhat) => {
+  %w(centos redhat) => {
+    %w(6.0 6.1 6.2 6.3 6.4 6.5 6.6) => 'docker-io',
+    'default' => 'docker'
+  },
+  'fedora' => {
     'default' => 'docker-io'
   },
   'debian' => {
@@ -90,7 +100,7 @@ default['docker']['package']['name'] = value_for_platform(
     'default' => 'homebrew/binary/docker'
   },
   'ubuntu' => {
-    %w(12.04 12.10 13.04 13.10 14.04) => 'lxc-docker',
+    %w(12.04 12.10 13.04 13.10 14.04 14.10 15.04) => 'lxc-docker',
     'default' => 'docker.io'
   },
   'default' => nil
@@ -100,12 +110,14 @@ default['docker']['package']['repo_url'] = value_for_platform(
     'default' => 'https://get.docker.io/ubuntu'
   },
   'ubuntu' => {
-    %w(12.04 12.10 13.04 13.10 14.04) => 'https://get.docker.io/ubuntu',
+    %w(12.04 12.10 13.04 13.10 14.04 14.10 15.04) => 'https://get.docker.io/ubuntu',
     'default' => nil
   },
   'default' => nil
 )
-default['docker']['package']['repo_key'] = 'https://get.docker.io/gpg'
+default['docker']['package']['repo_keyserver'] = 'hkp://keyserver.ubuntu.com:80'
+# Found at https://get.docker.io/ubuntu/
+default['docker']['package']['repo_key'] = 'A88D21E9'
 
 ## Source installation attributes
 
@@ -132,26 +144,40 @@ default['docker']['exec_driver'] = nil
 default['docker']['virtualization_type'] = node['docker']['exec_driver']
 
 default['docker']['graph'] = nil
-default['docker']['group'] = nil
+default['docker']['group'] = node['docker']['group_members'].empty? ? nil : 'docker'
 
 # DEPRECATED: Support for bind_socket/bind_uri
 default['docker']['host'] =
   if node['docker']['bind_socket'] || node['docker']['bind_uri']
     Array(node['docker']['bind_socket']) + Array(node['docker']['bind_uri'])
+  elsif node['docker']['init_type'] == 'systemd'
+    'fd://'
   else
     'unix:///var/run/docker.sock'
   end
 default['docker']['http_proxy'] = nil
 default['docker']['icc'] = nil
+default['docker']['insecure-registry'] = nil
 default['docker']['ip'] = nil
 default['docker']['iptables'] = nil
 default['docker']['mtu'] = nil
+default['docker']['no_proxy'] = nil
 default['docker']['options'] = nil
 default['docker']['pidfile'] = nil
 default['docker']['ramdisk'] = false
+default['docker']['registry-mirror'] = nil
 default['docker']['selinux_enabled'] = nil
 default['docker']['storage_driver'] = nil
 default['docker']['storage_opt'] = nil
+
+# the systemd system dir is different in newer Ubuntu (and debian?)
+default['docker']['systemd_system_dir'] = value_for_platform(
+  'ubuntu' => {
+    %w(15.04) => '/lib/systemd/system',
+    'default' => '/usr/lib/systemd/system'
+  },
+  'default' => '/usr/lib/systemd/system'
+)
 
 # DEPRECATED: will be removed in chef-docker 1.0
 default['docker']['storage_type'] = node['docker']['storage_driver']
@@ -182,4 +208,5 @@ default['docker']['registry_cmd_timeout'] = 60
 
 # Other attributes
 
-default['docker']['restart'] = false if node['docker']['container_init_type']
+# DEPRECATED: will be removed in chef-docker 1.0
+default['docker']['restart'] = nil

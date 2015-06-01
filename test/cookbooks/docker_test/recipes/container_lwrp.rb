@@ -72,7 +72,7 @@ directory '/mnt/docker' do
   action :create
 end
 
-docker_container 'bflad/testcontainerd' do
+docker_container 'tduffield/testcontainerd' do
   detach true
   port '9999:9999'
 end
@@ -89,6 +89,29 @@ docker_container "busybox-container" do
   image "busybox"
   container_name "busybox-container"
   command "sleep 8888"
+  init_type false
+  action :redeploy
+end
+
+docker_container "busybox" do
+  command "sleep 9999"
+  init_type false
+  action :create
+end
+
+docker_container "busybox2-container" do
+  image "busybox"
+  container_name "busybox2-container"
+  command "sleep 9777"
+  detach true
+  init_type false
+  action :create
+end
+
+docker_container "busybox2-container" do
+  image "busybox"
+  container_name "busybox2-container"
+  command "sleep 9888"
   init_type false
   action :redeploy
 end

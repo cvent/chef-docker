@@ -70,7 +70,7 @@ EOH
     # Boolean to determine whether or not we are using the docker.io package
     def self.using_docker_io_package?(node)
       node['docker']['install_type'] == 'package' &&
-      node['docker']['package']['name'] == 'docker.io'
+        node['docker']['package']['name'] == 'docker.io'
     end
 
     def self.daemon_cli_args(node)
@@ -86,10 +86,12 @@ EOH
         'graph' => node['docker']['graph'],
         'group' => node['docker']['group'],
         'icc' => node['docker']['icc'],
+        'insecure-registry' => Array(node['docker']['insecure-registry']),
         'ip' => node['docker']['ip'],
         'iptables' => node['docker']['iptables'],
         'mtu' => node['docker']['mtu'],
         'pidfile' => node['docker']['pidfile'],
+        'registry-mirror' => Array(node['docker']['registry-mirror']),
         'restart' => node['docker']['restart'],
         'selinux-enabled' => node['docker']['selinux_enabled'],
         'storage-driver' => node['docker']['storage_driver'],
