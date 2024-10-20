@@ -11,7 +11,7 @@ group :test do
   # elecksee is lxc dependency
   gem 'elecksee', '~> 1.0.20'
   gem 'foodcritic', '~> 3.0.3'
-  gem 'rubocop', '~> 0.23'
+  gem 'rubocop', '~> 0.93', '>= 0.93.1'
 end
 
 group :integration do
