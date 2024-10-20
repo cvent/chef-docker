@@ -10,7 +10,7 @@ group :test do
   gem 'chefspec', '~> 4.2.0'
   # elecksee is lxc dependency
   gem 'elecksee', '~> 1.0.20'
-  gem 'foodcritic', '~> 3.0.3'
+  gem 'foodcritic', '~> 16.3.0'
   gem 'rubocop', '~> 0.23'
 end
 
