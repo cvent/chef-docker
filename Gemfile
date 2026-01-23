@@ -16,7 +16,7 @@ end
 
 group :integration do
   gem 'busser-serverspec', '~> 0.2.6'
-  gem 'kitchen-vagrant', '~> 0.14'
+  gem 'kitchen-vagrant', '~> 2.2', '>= 2.2.1'
   gem 'test-kitchen', '~> 1.1'
 end
 
